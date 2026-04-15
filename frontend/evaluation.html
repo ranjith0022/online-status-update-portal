@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Web Development : 2 - Project Evaluation Criteria"
+    />
+    <title>Web Development : 2 - Project Evaluation Criteria</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./evaluation.css" />
+  </head>
+  <body>
+    <div class="bg-layer" aria-hidden="true"></div>
+
+    <header class="hero container">
+      <span class="badge">Premium Documentation</span>
+      <h1>Web Development : 2 - Project Evaluation Criteria</h1>
+      <p>
+        A professional checklist to evaluate backend quality, authentication,
+        CRUD completeness, state flow, and baseline application security.
+      </p>
+    </header>
+
+    <main class="container grid" id="criteria-grid">
+      <section class="card reveal">
+        <div class="card-head">
+          <div class="icon">API</div>
+          <h2>Backend API Development</h2>
+        </div>
+        <ul>
+          <li>RESTful API routes properly designed</li>
+          <li>Implemented using Express/Node or relevant backend</li>
+          <li>Tested using Postman or Thunder Client</li>
+          <li>Follow proper HTTP methods (GET, POST, PUT, DELETE)</li>
+        </ul>
+      </section>
+
+      <section class="card reveal">
+        <div class="card-head">
+          <div class="icon">AUTH</div>
+          <h2>Database &amp; Auth Integration</h2>
+        </div>
+        <ul>
+          <li>Secure database connection (MongoDB / PostgreSQL)</li>
+          <li>JWT-based authentication OR Firebase Authentication</li>
+          <li>Password hashing</li>
+          <li>Protected routes using middleware</li>
+        </ul>
+      </section>
+
+      <section class="card reveal">
+        <div class="card-head">
+          <div class="icon">CRUD</div>
+          <h2>Full-Stack CRUD</h2>
+        </div>
+        <ul>
+          <li>Frontend connected to backend APIs</li>
+          <li>Create, Read, Update, Delete operations working properly</li>
+          <li>Dynamic data rendering</li>
+          <li>Real-time UI updates</li>
+        </ul>
+      </section>
+
+      <section class="card reveal">
+        <div class="card-head">
+          <div class="icon">STATE</div>
+          <h2>State Management</h2>
+        </div>
+        <ul>
+          <li>Efficient state handling</li>
+          <li>Implemented using React Hooks / Redux / Zustand</li>
+          <li>Clean data flow between components</li>
+          <li>Optimized re-renders</li>
+        </ul>
+      </section>
+
+      <section class="card reveal">
+        <div class="card-head">
+          <div class="icon">SEC</div>
+          <h2>Error Handling &amp; Security</h2>
+        </div>
+        <ul>
+          <li>Server-side validation</li>
+          <li>Secure HTTP headers</li>
+          <li>Proper error responses</li>
+          <li>Logging mechanism</li>
+          <li>Basic protection against common vulnerabilities</li>
+        </ul>
+      </section>
+    </main>
+
+    <footer class="footer container">
+      <p>
+        Web Development : 2 • Project Evaluation Criteria • Phase 2 Submission
+      </p>
+    </footer>
+
+    <script src="./evaluation.js"></script>
+  </body>
+</html>

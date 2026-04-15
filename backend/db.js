@@ -1,4 +1,4 @@
-﻿const path = require("path");
+const path = require("path");
 const sqlite3 = require("sqlite3").verbose();
 
 const DB_FILE = process.env.DB_FILE || path.join(__dirname, "data.db");

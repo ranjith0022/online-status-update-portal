@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+﻿import React, { useEffect, useMemo, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import Chart from "chart.js/auto";
 import { api } from "./api.js";
@@ -19,22 +19,30 @@ function urlBase64ToUint8Array(base64String) {
   return output;
 }
 
+function initialsFromUser(user) {
+  const text = user?.display_name || user?.email || "U";
+  const parts = text.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+  return text.slice(0, 2).toUpperCase();
+}
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [isRegister, setIsRegister] = useState(false);
-  const [message, setMessage] = useState("");
-  const [messageType, setMessageType] = useState("info");
+
   const [updates, setUpdates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filterMood, setFilterMood] = useState("all");
+  const [isFilterAnimating, setIsFilterAnimating] = useState(false);
 
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [pollQuestion, setPollQuestion] = useState("");
   const [pollOptions, setPollOptions] = useState(["", ""]);
+  const [editingId, setEditingId] = useState(null);
 
   const [activeUsers, setActiveUsers] = useState([]);
   const [moodTrends, setMoodTrends] = useState([]);
@@ -45,11 +53,30 @@ export default function App() {
   });
   const [favoriteMoods, setFavoriteMoods] = useState([]);
 
+  const [toasts, setToasts] = useState([]);
+  const [activeNav, setActiveNav] = useState("feed");
+  const [showCompose, setShowCompose] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [lightMode, setLightMode] = useState(false);
+
   const socketRef = useRef(null);
   const moodChartRef = useRef(null);
   const userChartRef = useRef(null);
+  const profileRef = useRef(null);
+  const composeRef = useRef(null);
+  const feedRef = useRef(null);
+  const analyticsRef = useRef(null);
+  const prefsRef = useRef(null);
 
   const isAdmin = useMemo(() => user && user.role === "admin", [user]);
+
+  function notify(text, type = "info") {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setToasts((prev) => [...prev, { id, text, type }]);
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 3000);
+  }
 
   async function loadUpdates(mood = filterMood) {
     try {
@@ -70,7 +97,7 @@ export default function App() {
       setActiveUsers(top.topUsers || []);
       setMoodTrends(trends.trends || []);
     } catch (err) {
-      // ignore analytics failures
+      // intentionally quiet
     }
   }
 
@@ -82,7 +109,7 @@ export default function App() {
         setFavoriteMoods(JSON.parse(res.prefs.favorite_moods || "[]") || []);
       }
     } catch (err) {
-      // ignore
+      // intentionally quiet
     }
   }
 
@@ -111,6 +138,7 @@ export default function App() {
     socketRef.current.on("update:new", (payload) => {
       if (!payload) return;
       setUpdates((prev) => [payload, ...prev]);
+      notify("New status update received.", "info");
     });
     socketRef.current.on("update:reaction", (payload) => {
       if (!payload) return;
@@ -119,6 +147,11 @@ export default function App() {
     socketRef.current.on("poll:vote", (payload) => {
       if (!payload) return;
       setUpdates((prev) => prev.map((u) => (u.id === payload.id ? payload : u)));
+    });
+    socketRef.current.on("update:edit", (payload) => {
+      if (!payload) return;
+      setUpdates((prev) => prev.map((u) => (u.id === payload.id ? payload : u)));
+      notify("Status update edited.", "info");
     });
 
     return () => {
@@ -135,9 +168,7 @@ export default function App() {
     const userCanvas = document.getElementById("userChart");
     if (!moodCanvas || !userCanvas) return;
 
-    const days = Array.from(
-      new Set(moodTrends.map((t) => t.day))
-    );
+    const days = Array.from(new Set(moodTrends.map((t) => t.day)));
     const dataByMood = MOODS.map((m) =>
       days.map((d) => moodTrends.find((t) => t.day === d && t.mood === m)?.count || 0)
     );
@@ -149,15 +180,21 @@ export default function App() {
         datasets: MOODS.map((m, idx) => ({
           label: m,
           data: dataByMood[idx],
-          borderColor: m === "positive" ? "#2f855a" : m === "negative" ? "#c53030" : "#1b4d89",
+          borderColor:
+            m === "positive" ? "#00ff9c" : m === "negative" ? "#ff3a6d" : "#6ab7ff",
           backgroundColor: "transparent",
-          tension: 0.3,
+          tension: 0.35,
+          borderWidth: 2,
         })),
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        plugins: { legend: { position: "bottom" } },
+        plugins: { legend: { position: "bottom", labels: { color: "#d9e4ff" } } },
+        scales: {
+          x: { ticks: { color: "#b6c8f9" }, grid: { color: "rgba(128, 151, 214, 0.18)" } },
+          y: { ticks: { color: "#b6c8f9" }, grid: { color: "rgba(128, 151, 214, 0.18)" } },
+        },
       },
     });
 
@@ -169,7 +206,9 @@ export default function App() {
           {
             label: "Updates",
             data: activeUsers.map((u) => u.count),
-            backgroundColor: "#1b4d89",
+            backgroundColor: "rgba(67, 201, 255, 0.7)",
+            borderColor: "#43c9ff",
+            borderWidth: 1,
           },
         ],
       },
@@ -177,14 +216,26 @@ export default function App() {
         responsive: true,
         maintainAspectRatio: false,
         plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: "#b6c8f9" }, grid: { color: "rgba(128, 151, 214, 0.12)" } },
+          y: { ticks: { color: "#b6c8f9" }, grid: { color: "rgba(128, 151, 214, 0.12)" } },
+        },
       },
     });
   }, [moodTrends, activeUsers, layoutPrefs.showAnalytics]);
 
+  useEffect(() => {
+    function onClickOutside(e) {
+      if (profileRef.current && !profileRef.current.contains(e.target)) {
+        setProfileOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, []);
+
   async function handleAuth(e) {
     e.preventDefault();
-    setMessage("");
-    setMessageType("info");
     try {
       const res = await api(isRegister ? "/api/auth/register" : "/api/auth/login", {
         method: "POST",
@@ -195,9 +246,9 @@ export default function App() {
       await loadAnalytics();
       await loadPrefs();
       setPassword("");
+      notify(isRegister ? "Account created." : "Signed in successfully.");
     } catch (err) {
-      setMessageType("error");
-      setMessage(err.message);
+      notify(err.message, "error");
     }
   }
 
@@ -205,37 +256,63 @@ export default function App() {
     await api("/api/auth/logout", { method: "POST" });
     setUser(null);
     setUpdates([]);
+    notify("Logged out.");
   }
 
   async function createUpdate(e) {
     e.preventDefault();
-    setMessage("");
-    setMessageType("info");
     try {
       const payload = {
         title: title || "Status update",
         body,
       };
-      if (layoutPrefs.showPolls && pollQuestion.trim()) {
+      if (!editingId && layoutPrefs.showPolls && pollQuestion.trim()) {
         payload.poll = {
           question: pollQuestion,
           options: pollOptions.filter((o) => o.trim().length > 0),
         };
       }
-      await api("/api/updates", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
+      if (editingId) {
+        await api(`/api/updates/${editingId}`, {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        });
+      } else {
+        await api("/api/updates", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+      }
       await loadUpdates();
       await loadAnalytics();
       setTitle("");
       setBody("");
       setPollQuestion("");
       setPollOptions(["", ""]);
+      setEditingId(null);
+      notify("Status posted.");
     } catch (err) {
-      setMessageType("error");
-      setMessage(err.message);
+      notify(err.message, "error");
     }
+  }
+
+  function clearPostForm() {
+    setTitle("");
+    setBody("");
+    setPollQuestion("");
+    setPollOptions(["", ""]);
+    setEditingId(null);
+    notify("Post form cleared.");
+  }
+
+  function startEdit(update) {
+    setTitle(update.title || "");
+    setBody(update.body || "");
+    setPollQuestion("");
+    setPollOptions(["", ""]);
+    setEditingId(update.id);
+    setShowCompose(true);
+    scrollToSection("compose");
   }
 
   async function sendReaction(updateId, reaction) {
@@ -248,8 +325,7 @@ export default function App() {
         setUpdates((prev) => prev.map((u) => (u.id === updateId ? res.update : u)));
       }
     } catch (err) {
-      setMessageType("error");
-      setMessage(err.message);
+      notify(err.message, "error");
     }
   }
 
@@ -263,8 +339,7 @@ export default function App() {
         setUpdates((prev) => prev.map((u) => (u.id === res.update.id ? res.update : u)));
       }
     } catch (err) {
-      setMessageType("error");
-      setMessage(err.message);
+      notify(err.message, "error");
     }
   }
 
@@ -277,9 +352,9 @@ export default function App() {
           favoriteMoods: nextFavs,
         }),
       });
+      notify("Preferences saved.");
     } catch (err) {
-      setMessageType("error");
-      setMessage(err.message);
+      notify(err.message, "error");
     }
   }
 
@@ -287,8 +362,7 @@ export default function App() {
     try {
       const keyRes = await api("/api/notifications/public-key");
       if (!keyRes.publicKey) {
-        setMessageType("error");
-        setMessage("Push notifications not configured on server.");
+        notify("Push notifications are not configured on the server.", "error");
         return;
       }
       const reg = await navigator.serviceWorker.ready;
@@ -300,35 +374,70 @@ export default function App() {
         method: "POST",
         body: JSON.stringify(subscription),
       });
-      setMessageType("info");
-      setMessage("Notifications enabled.");
+      notify("Notifications enabled.");
     } catch (err) {
-      setMessageType("error");
-      setMessage("Unable to enable notifications.");
+      notify("Unable to enable notifications.", "error");
     }
+  }
+
+  async function onFilterChange(nextMood) {
+    setFilterMood(nextMood);
+    setIsFilterAnimating(true);
+    await loadUpdates(nextMood);
+    window.setTimeout(() => setIsFilterAnimating(false), 220);
+  }
+
+  function scrollToSection(section) {
+    const refs = {
+      compose: composeRef,
+      feed: feedRef,
+      analytics: analyticsRef,
+      prefs: prefsRef,
+    };
+
+    if (section === "compose") {
+      setShowCompose(true);
+      setActiveNav(section);
+      window.setTimeout(() => {
+        composeRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 0);
+      return;
+    }
+
+    setShowCompose(false);
+    setActiveNav(section);
+    const target = refs[section]?.current;
+    if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   if (loading) {
     return (
-      <div className="page">
-        <div className="card">Loading...</div>
+      <div className="auth-page">
+        <div className="gradient-bg" />
+        <div className="auth-card glass-card">Loading portal...</div>
       </div>
     );
   }
 
   if (!user) {
     return (
-      <div className="page">
-        <div className="card">
+      <div className="auth-page">
+        <div className="gradient-bg" />
+        <div className="particles" aria-hidden="true">
+          {Array.from({ length: 14 }).map((_, idx) => (
+            <span key={idx} style={{ "--i": idx + 1 }} />
+          ))}
+        </div>
+        <div className="auth-card glass-card slide-in-up">
           <h1>Online Status Update Portal</h1>
-          <p className="muted">Secure sign-in for your team.</p>
+          <p className="muted">Next-gen status intelligence in real time.</p>
           <form onSubmit={handleAuth} className="form">
             {isRegister && (
               <>
                 <label>Display name</label>
                 <input
                   type="text"
-                  placeholder="Jane Doe"
+                  placeholder="Nova Analyst"
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
                 />
@@ -350,245 +459,366 @@ export default function App() {
               onChange={(e) => setPassword(e.target.value)}
               required
             />
-            <button type="submit">{isRegister ? "Create account" : "Sign in"}</button>
+            <button type="submit" className="neon-btn">
+              {isRegister ? "Create account" : "Enter portal"}
+            </button>
           </form>
           <button className="secondary" onClick={() => setIsRegister((v) => !v)}>
             {isRegister ? "Have an account? Sign in" : "New here? Create account"}
           </button>
-          {message && (
-            <div className={`message ${messageType === "error" ? "message-error" : ""}`}>
-              {message}
+        </div>
+
+        <div className="toast-stack">
+          {toasts.map((toast) => (
+            <div key={toast.id} className={`toast ${toast.type === "error" ? "toast-error" : ""}`}>
+              {toast.text}
             </div>
-          )}
+          ))}
         </div>
       </div>
     );
   }
 
   return (
-    <div className="page">
-      <header className="topbar">
-        <div>
-          <h1>Online Status Update Portal</h1>
-          <p className="muted">Signed in as {user.display_name || user.email}</p>
-        </div>
-        <div className="topbar-actions">
-          <button className="secondary" onClick={toggleNotifications}>
-            Enable notifications
-          </button>
-          <button onClick={logout}>Logout</button>
-        </div>
-      </header>
+    <div className={`app-shell ${lightMode ? "theme-light" : ""}`}>
+      <div className="gradient-bg" />
+      <div className="particles" aria-hidden="true">
+        {Array.from({ length: 20 }).map((_, idx) => (
+          <span key={idx} style={{ "--i": idx + 1 }} />
+        ))}
+      </div>
 
-      {message && (
-        <div className={`message ${messageType === "error" ? "message-error" : ""}`}>
-          {message}
+      <aside className="sidebar glass-card">
+        <div className="brand">
+          <div className="brand-dot" />
+          <div>
+            <h2>STATUS OS</h2>
+            <p>Quantum board</p>
+          </div>
         </div>
-      )}
 
-      <div className="toolbar">
-        <div className="filter">
-          <label>Mood filter</label>
-          <select
-            value={filterMood}
-            onChange={(e) => {
-              const val = e.target.value;
-              setFilterMood(val);
-              loadUpdates(val);
-            }}
+        <nav className="side-nav">
+          {isAdmin && (
+            <button
+              type="button"
+              className={activeNav === "compose" ? "active" : ""}
+              onClick={() => scrollToSection("compose")}
+            >
+              Compose
+            </button>
+          )}
+          <button
+            type="button"
+            className={activeNav === "feed" ? "active" : ""}
+            onClick={() => scrollToSection("feed")}
           >
-            <option value="all">All</option>
-            {MOODS.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="prefs">
-          <label>Dashboard</label>
-          <div className="prefs-toggle">
-            <input
-              type="checkbox"
-              checked={layoutPrefs.showAnalytics}
-              onChange={(e) => {
-                const next = { ...layoutPrefs, showAnalytics: e.target.checked };
-                setLayoutPrefs(next);
-                savePrefs(next, favoriteMoods);
-              }}
-            />
-            <span>Analytics</span>
+            Live Feed
+          </button>
+          <button
+            type="button"
+            className={activeNav === "analytics" ? "active" : ""}
+            onClick={() => scrollToSection("analytics")}
+          >
+            Analytics
+          </button>
+          <button
+            type="button"
+            className={activeNav === "prefs" ? "active" : ""}
+            onClick={() => scrollToSection("prefs")}
+          >
+            Preferences
+          </button>
+        </nav>
+      </aside>
+
+      <div className="main-wrap">
+        <header className="topbar-glass glass-card">
+          <div>
+            <h1>Status Command Center</h1>
+            <p className="muted">Signed in as {user.display_name || user.email}</p>
           </div>
-          <div className="prefs-toggle">
-            <input
-              type="checkbox"
-              checked={layoutPrefs.showPolls}
-              onChange={(e) => {
-                const next = { ...layoutPrefs, showPolls: e.target.checked };
-                setLayoutPrefs(next);
-                savePrefs(next, favoriteMoods);
-              }}
-            />
-            <span>Polls</span>
+
+          <div className="topbar-actions">
+            <button
+              className="secondary"
+              type="button"
+              onClick={() => setLightMode((v) => !v)}
+            >
+              {lightMode ? "Dark mode" : "Light mode"}
+            </button>
+            <button className="secondary" type="button" onClick={toggleNotifications}>
+              Notifications
+            </button>
+
+            <div className="profile" ref={profileRef}>
+              <button
+                type="button"
+                className="avatar-btn"
+                onClick={() => setProfileOpen((v) => !v)}
+                aria-expanded={profileOpen}
+              >
+                {initialsFromUser(user)}
+              </button>
+              <div className={`profile-menu ${profileOpen ? "open" : ""}`}>
+                <div className="profile-meta">{user.display_name || user.email}</div>
+                <button type="button" onClick={logout}>
+                  Logout
+                </button>
+              </div>
+            </div>
           </div>
-        </div>
-        <div className="prefs">
-          <label>Favorite moods</label>
-          <div className="prefs-row">
-            {MOODS.map((m) => (
-              <label key={m} className="pill">
+        </header>
+
+        <main className="dashboard-grid">
+          {isAdmin && showCompose && (
+            <section ref={composeRef} className="glass-card card section-anchor fade-in">
+              <h2>{editingId ? "Update status" : "Post status"}</h2>
+              <form onSubmit={createUpdate} className="form">
+                <label>Title</label>
                 <input
-                  type="checkbox"
-                  checked={favoriteMoods.includes(m)}
-                  onChange={(e) => {
-                    const next = e.target.checked
-                      ? [...favoriteMoods, m]
-                      : favoriteMoods.filter((x) => x !== m);
-                    setFavoriteMoods(next);
-                    savePrefs(layoutPrefs, next);
-                  }}
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Application milestone update"
                 />
-                <span>{m}</span>
-              </label>
-            ))}
-          </div>
-        </div>
+                <label>Status update</label>
+                <textarea
+                  rows="4"
+                  value={body}
+                  onChange={(e) => setBody(e.target.value)}
+                  placeholder="Share status changes, approvals, risks, and next actions."
+                  required
+                />
+                {layoutPrefs.showPolls && !editingId && (
+                  <div className="poll-builder">
+                    <label>Poll question (optional)</label>
+                    <input
+                      value={pollQuestion}
+                      onChange={(e) => setPollQuestion(e.target.value)}
+                      placeholder="Which initiative should be prioritized?"
+                    />
+                    <label>Poll options</label>
+                    {pollOptions.map((opt, idx) => (
+                      <input
+                        key={idx}
+                        value={opt}
+                        onChange={(e) => {
+                          const next = [...pollOptions];
+                          next[idx] = e.target.value;
+                          setPollOptions(next);
+                        }}
+                        placeholder={`Option ${idx + 1}`}
+                      />
+                    ))}
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => setPollOptions((prev) => [...prev, ""])}
+                    >
+                      Add option
+                    </button>
+                  </div>
+                )}
+                <div className="form-actions">
+                  <button type="submit" className="neon-btn">
+                    {editingId ? "Save changes" : "Publish update"}
+                  </button>
+                  <button type="button" className="secondary" onClick={clearPostForm}>
+                    {editingId ? "Cancel edit" : "Clear form"}
+                  </button>
+                </div>
+              </form>
+            </section>
+          )}
+
+          <section ref={prefsRef} className="glass-card card section-anchor fade-in">
+            <h2>Dashboard controls</h2>
+            <div className="toolbar-grid">
+              <div className="filter">
+                <label>Mood filter</label>
+                <select value={filterMood} onChange={(e) => onFilterChange(e.target.value)}>
+                  <option value="all">All</option>
+                  {MOODS.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="prefs">
+                <label>Widgets</label>
+                <label className="prefs-toggle">
+                  <input
+                    type="checkbox"
+                    checked={layoutPrefs.showAnalytics}
+                    onChange={(e) => {
+                      const next = { ...layoutPrefs, showAnalytics: e.target.checked };
+                      setLayoutPrefs(next);
+                      savePrefs(next, favoriteMoods);
+                    }}
+                  />
+                  <span>Analytics</span>
+                </label>
+                <label className="prefs-toggle">
+                  <input
+                    type="checkbox"
+                    checked={layoutPrefs.showPolls}
+                    onChange={(e) => {
+                      const next = { ...layoutPrefs, showPolls: e.target.checked };
+                      setLayoutPrefs(next);
+                      savePrefs(next, favoriteMoods);
+                    }}
+                  />
+                  <span>Polls</span>
+                </label>
+                <label className="prefs-toggle">
+                  <input
+                    type="checkbox"
+                    checked={layoutPrefs.showReactions}
+                    onChange={(e) => {
+                      const next = { ...layoutPrefs, showReactions: e.target.checked };
+                      setLayoutPrefs(next);
+                      savePrefs(next, favoriteMoods);
+                    }}
+                  />
+                  <span>Reactions</span>
+                </label>
+              </div>
+
+              <div className="prefs">
+                <label>Favorite moods</label>
+                <div className="prefs-row">
+                  {MOODS.map((m) => (
+                    <label key={m} className="pill">
+                      <input
+                        type="checkbox"
+                        checked={favoriteMoods.includes(m)}
+                        onChange={(e) => {
+                          const next = e.target.checked
+                            ? [...favoriteMoods, m]
+                            : favoriteMoods.filter((x) => x !== m);
+                          setFavoriteMoods(next);
+                          savePrefs(layoutPrefs, next);
+                        }}
+                      />
+                      <span>{m}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {layoutPrefs.showAnalytics && (
+            <section ref={analyticsRef} className="glass-card card section-anchor fade-in">
+              <h2>Analytics</h2>
+              <div className="analytics-grid">
+                <div className="chart-card">
+                  <h3>Mood trend</h3>
+                  <div className="chart-wrap">
+                    <canvas id="moodChart" height="220" />
+                  </div>
+                </div>
+                <div className="chart-card">
+                  <h3>Most active users</h3>
+                  <div className="chart-wrap">
+                    <canvas id="userChart" height="220" />
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+
+          <section ref={feedRef} className="glass-card card section-anchor fade-in">
+            <h2>Live status feed</h2>
+            {updates.length === 0 ? (
+              <div className="empty">
+                <div className="empty-title">No updates yet</div>
+                <div className="muted">Create the first status update to get started.</div>
+              </div>
+            ) : (
+              <div className={`updates ${isFilterAnimating ? "is-switching" : ""}`}>
+                {updates.map((u) => (
+                  <div key={u.id} className={`update mood-${u.mood}`}>
+                    <div className="update-head">
+                      <span className={`badge badge-${u.mood}`}>{u.mood}</span>
+                      <span className="muted">
+                        {formatTime(u.created_at)} by {u.author_name}
+                      </span>
+                    </div>
+                    <h3>{u.title}</h3>
+                    <p>{u.body}</p>
+
+                    {isAdmin && (
+                      <div className="reactions">
+                        <button
+                          type="button"
+                          className="reaction-btn"
+                          onClick={() => startEdit(u)}
+                        >
+                          Edit
+                        </button>
+                      </div>
+                    )}
+
+                    {layoutPrefs.showReactions && (
+                      <div className="reactions">
+                        {REACTIONS.map((r) => {
+                          const count = u.reactions?.find((x) => x.reaction === r)?.count || 0;
+                          return (
+                            <button
+                              key={r}
+                              type="button"
+                              className="reaction-btn"
+                              onClick={() => sendReaction(u.id, r)}
+                            >
+                              {r} · {count}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {u.poll && (
+                      <div className="poll">
+                        <div className="poll-question">{u.poll.question}</div>
+                        <div className="poll-options">
+                          {u.poll.options.map((opt) => (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              className={`poll-option ${u.poll.myVote === opt.id ? "selected" : ""}`}
+                              onClick={() => votePoll(u.poll.id, opt.id)}
+                            >
+                              <span>{opt.text}</span>
+                              <span className="muted">{opt.votes} votes</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </main>
       </div>
 
       {isAdmin && (
-        <div className="card">
-          <h2>Post a status</h2>
-          <form onSubmit={createUpdate} className="form">
-            <label>Title</label>
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Weekly progress"
-            />
-            <label>Status update</label>
-            <textarea
-              rows="4"
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              placeholder="Share what changed, blockers, and next steps."
-              required
-            />
-            {layoutPrefs.showPolls && (
-              <div className="poll-builder">
-                <label>Poll question (optional)</label>
-                <input
-                  value={pollQuestion}
-                  onChange={(e) => setPollQuestion(e.target.value)}
-                  placeholder="Which initiative should be prioritized?"
-                />
-                <label>Poll options</label>
-                {pollOptions.map((opt, idx) => (
-                  <input
-                    key={idx}
-                    value={opt}
-                    onChange={(e) => {
-                      const next = [...pollOptions];
-                      next[idx] = e.target.value;
-                      setPollOptions(next);
-                    }}
-                    placeholder={`Option ${idx + 1}`}
-                  />
-                ))}
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={() => setPollOptions((prev) => [...prev, ""])}
-                >
-                  Add option
-                </button>
-              </div>
-            )}
-            <button type="submit">Publish</button>
-          </form>
-        </div>
+        <button type="button" className="fab" onClick={() => scrollToSection("compose")}>
+          +
+        </button>
       )}
 
-      {layoutPrefs.showAnalytics && (
-        <div className="card">
-          <h2>Analytics</h2>
-          <div className="analytics-grid">
-            <div className="chart-card">
-              <h3>Mood trend</h3>
-              <div className="chart-wrap">
-                <canvas id="moodChart" height="220" />
-              </div>
-            </div>
-            <div className="chart-card">
-              <h3>Most active users</h3>
-              <div className="chart-wrap">
-                <canvas id="userChart" height="220" />
-              </div>
-            </div>
+      <div className="toast-stack">
+        {toasts.map((toast) => (
+          <div key={toast.id} className={`toast ${toast.type === "error" ? "toast-error" : ""}`}>
+            {toast.text}
           </div>
-        </div>
-      )}
-
-      <div className="card">
-        <h2>Latest updates</h2>
-        {updates.length === 0 ? (
-          <div className="empty">
-            <div className="empty-title">No updates yet</div>
-            <div className="muted">Create the first status update to get started.</div>
-          </div>
-        ) : (
-          <div className="updates">
-            {updates.map((u) => (
-              <div key={u.id} className="update">
-                <div className="update-head">
-                  <span className={`badge badge-${u.mood}`}>{u.mood}</span>
-                  <span className="muted">
-                    {formatTime(u.created_at)} by {u.author_name}
-                  </span>
-                </div>
-                <h3>{u.title}</h3>
-                <p>{u.body}</p>
-
-                {layoutPrefs.showReactions && (
-                  <div className="reactions">
-                    {REACTIONS.map((r) => {
-                      const count = u.reactions?.find((x) => x.reaction === r)?.count || 0;
-                      return (
-                        <button
-                          key={r}
-                          type="button"
-                          className="reaction-btn"
-                          onClick={() => sendReaction(u.id, r)}
-                        >
-                          {r} · {count}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {u.poll && (
-                  <div className="poll">
-                    <div className="poll-question">{u.poll.question}</div>
-                    <div className="poll-options">
-                      {u.poll.options.map((opt) => (
-                        <button
-                          key={opt.id}
-                          type="button"
-                          className={`poll-option ${u.poll.myVote === opt.id ? "selected" : ""}`}
-                          onClick={() => votePoll(u.poll.id, opt.id)}
-                        >
-                          <span>{opt.text}</span>
-                          <span className="muted">{opt.votes} votes</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+        ))}
       </div>
     </div>
   );
 }
+

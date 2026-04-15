@@ -104,6 +104,8 @@ async function getUserFromSession(req) {
   const expiresAt = new Date(session.expires_at);
   if (expiresAt <= new Date()) {
     await run("DELETE FROM sessions WHERE id = ?", [sessionId]);
+
+    
     return null;
   }
 
@@ -385,6 +387,33 @@ app.post("/api/updates", requireAuth(async (req, res) => {
     body: payload ? payload.title : "New update posted",
   });
 
+  res.json({ update: payload });
+}));
+
+app.put("/api/updates/:id", requireAuth(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const title = String(req.body.title || "Status update").trim();
+  const body = String(req.body.body || req.body.text || "").trim();
+  const status = String(req.body.category || "Update").trim();
+
+  if (!id || !body) {
+    return res.status(400).json({ error: "missing_fields" });
+  }
+
+  const existing = await get("SELECT id, author_id FROM updates WHERE id = ?", [id]);
+  if (!existing) return res.status(404).json({ error: "not_found" });
+  if (req.user.role !== "admin" && existing.author_id !== req.user.id) {
+    return res.status(403).json({ error: "forbidden" });
+  }
+
+  const mood = detectMood(`${title} ${body}`);
+  await run(
+    "UPDATE updates SET title = ?, status = ?, body = ?, mood = ?, updated_at = ? WHERE id = ?",
+    [title, status, body, mood, nowIso(), id]
+  );
+
+  const payload = await buildUpdatePayload(id, req.user.id);
+  io.emit("update:edit", payload);
   res.json({ update: payload });
 }));
 
